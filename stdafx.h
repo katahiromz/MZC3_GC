@@ -1,4 +1,4 @@
-/* MZC3_GC -- MZC3 C/C++ garbage collector library
+/* MZC3_GC -- MZC3 C/C++ garbage collector
    by Katayama Hirofumi MZ <katayama.hirofumi.mz@gmail.com>
    This file is public domain software. */
 
@@ -8,6 +8,7 @@
     #endif
 #else
     #include <sys/types.h>  // gettid
+    #include <pthread.h>
 #endif
 
 #include <map>
@@ -21,3 +22,6 @@
 
 // Multithread
 //#define MZC_GC_MT
+
+// Debugging output to stderr (for Windows only)
+//#define MZC_DEBUG_OUTPUT_IS_STDERR

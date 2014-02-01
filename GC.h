@@ -1,4 +1,4 @@
-/* MZC3_GC -- MZC3 C/C++ garbage collector library
+/* MZC3_GC -- MZC3 C/C++ garbage collector
    by Katayama Hirofumi MZ <katayama.hirofumi.mz@gmail.com>
    This file is public domain software. */
 #ifndef __MZC3_GC_H__
@@ -13,10 +13,10 @@
 #endif
 
 //////////////////////////////////////////////////////////////////////////////
-// NOTE: Use new_nothrow rather than ::new(std::nothrow) for this library.
+// NOTE: Use new_nothrow rather than ::new(std::nothrow) to enable GC.
 
 #ifdef MZC_NO_GC
-    // no effect
+    // no effect if defined(MZC_NO_GC)
     #define MzcGC_Enter(enable_gc)
     #define MzcGC_Leave()
     #define MzcGC_GarbageCollect()
@@ -38,7 +38,7 @@
         // Report the leaks in the current GC section.
         void MzcGC_Report(void);
     #else
-        // no effect
+        // no effect if defined(NDEBUG)
         #define MzcGC_Report()
     #endif
 

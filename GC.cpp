@@ -1,11 +1,13 @@
-/* MZC3_GC -- MZC3 C/C++ garbage collector library
+/* MZC3_GC -- MZC3 C/C++ garbage collector
    by Katayama Hirofumi MZ <katayama.hirofumi.mz@gmail.com>
    This file is public domain software. */
 
 // The switching macros:
-//   NDEBUG for non-debugging,
-//   MZC_GC_MT for multithread,
-//   _WIN32 for Windows.
+//  #define MZC_NO_GC to disable GC,
+//  #define NDEBUG for non-debugging,
+//  #define MZC_GC_MT for multithread,
+//  #define MZC_DEBUG_OUTPUT_IS_STDERR to output report to stderr (Windows only),
+//  #define _WIN32 for Windows.
 
 #include "stdafx.h"
 
@@ -99,11 +101,13 @@ struct MZC3_GC_STATE
 
 struct MZC3_GC_THREAD_ENTRY
 {
-#ifdef _WIN32
-    DWORD tid;
-#else
-    pid_t tid;
-#endif
+    #ifdef MZC_GC_MT
+        #ifdef _WIN32
+            DWORD tid;
+        #else
+            pid_t tid;
+        #endif
+    #endif
     std::size_t    depth;
     MZC3_GC_STATE *state_stack;
 };
@@ -113,7 +117,7 @@ struct MZC3_GC_THREAD_ENTRY
     static std::size_t s_gc_thread_entry_count = 0;
     static std::size_t s_gc_thread_entry_capacity = 0;
 #else
-    static MZC3_GC_THREAD_ENTRY s_only_one_gc_thread_entry = {0, 0, NULL};
+    static MZC3_GC_THREAD_ENTRY s_only_one_gc_thread_entry = {0, NULL};
 #endif
 
 //////////////////////////////////////////////////////////////////////////////
@@ -188,35 +192,59 @@ inline bool MZC3_GC_IsEnabled(void)
 //////////////////////////////////////////////////////////////////////////////
 // synchronization
 
-#if defined(_WIN32) && defined(MZC_GC_MT)
-    static CRITICAL_SECTION s_gc_cs;
+#ifdef MZC_GC_MT
+    #ifdef _WIN32
+        static CRITICAL_SECTION s_gc_cs;
+    #else
+        static pthread_mutex_t s_gc_cs;
+    #endif
 #endif
 
 inline void InitializeLock(void)
 {
-    #if defined(_WIN32) && defined(MZC_GC_MT)
-        InitializeCriticalSection(&s_gc_cs);
-    #endif
-}
-
-inline void DeleteLock(void)
-{
-    #if defined(_WIN32) && defined(MZC_GC_MT)
-        DeleteCriticalSection(&s_gc_cs);
+    #ifdef MZC_GC_MT
+        #ifdef _WIN32
+            InitializeCriticalSection(&s_gc_cs);
+        #else
+            pthread_mutexattr_t attr;
+            pthread_mutexattr_init(&attr);
+            pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE_NP);
+            pthread_mutex_init(&s_gc_cs, &attr);
+            pthread_mutexattr_destroy(&attr);
+        #endif
     #endif
 }
 
 inline void EnterLock(void)
 {
-    #if defined(_WIN32) && defined(MZC_GC_MT)
-        EnterCriticalSection(&s_gc_cs);
+    #ifdef MZC_GC_MT
+        #ifdef _WIN32
+            EnterCriticalSection(&s_gc_cs);
+        #else
+            pthread_mutex_lock(&s_gc_cs);
+        #endif
     #endif
 }
 
 inline void LeaveLock(void)
 {
-    #if defined(_WIN32) && defined(MZC_GC_MT)
-        LeaveCriticalSection(&s_gc_cs);
+    #ifdef MZC_GC_MT
+        #ifdef _WIN32
+            LeaveCriticalSection(&s_gc_cs);
+        #else
+            pthread_mutex_unlock(&s_gc_cs);
+        #endif
+    #endif
+}
+
+inline void DeleteLock(void)
+{
+    #ifdef MZC_GC_MT
+        #ifdef _WIN32
+            DeleteCriticalSection(&s_gc_cs);
+        #else
+            pthread_mutex_destroy(&s_gc_cs);
+        #endif
     #endif
 }
 
@@ -227,8 +255,6 @@ static MZC3_GC_ENTRY *s_gc_entries = NULL;
 static std::size_t    s_gc_count = 0;
 static std::size_t    s_gc_capacity = 0;
 static bool           s_gc_constructed = false;
-
-static char *         s_gc_enabled_stack = NULL;
 
 class MZC3_GC_MGR
 {
@@ -242,6 +268,8 @@ public:
     ~MZC3_GC_MGR()
     {
         assert(s_gc_entries == NULL || s_gc_capacity);
+
+        EnterLock();
         s_gc_constructed = false;
 
         std::size_t gc_count = s_gc_count;
@@ -282,6 +310,7 @@ public:
                 state = next;
             }
         #endif
+        LeaveLock();
 
         DeleteLock();
     }
@@ -798,17 +827,17 @@ extern "C" void MzcGC_GarbageCollect(void)
         void *p3;
         char *p4;
         void *p5;
-        MzcGC_Enter(true);
+        MzcGC_Enter(1); // GC-enabled section
         {
             void *p1 = malloc(1);
             printf("p1: %p\n", p1);
-            MzcGC_Enter(true);
+            MzcGC_Enter(1); // GC-enabled section
             {
                 p2 = realloc(NULL, 2);
                 printf("p2: %p\n", p2);
                 p3 = new char[3];
                 printf("p3: %p\n", p3);
-                MzcGC_Enter(false); // disable GC
+                MzcGC_Enter(0); // GC-disabled section
                 {
                     p4 = new char[4];
                     printf("p4: %p\n", p4);
