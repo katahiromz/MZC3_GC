@@ -1,0 +1,1 @@
+g++ -m32 -Wall -pedantic -DUNITTEST -o GC.exe GC.cpp

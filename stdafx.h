@@ -11,17 +11,24 @@
     #include <pthread.h>
 #endif
 
-#include <map>
-#include <cstdlib>
-#include <cstdio>
-#include <cassert>
-#include "GC.h"
+#include <map>      // std::map
+
+#include <cstdlib>  // malloc, calloc, realloc, free
+#include <cstdio>   // std::fprintf, std::vfprintf
+#include <cstring>  // std::strcpy, std::memcpy
+#include <cwchar>   // std::wcscpy
+#include <cassert>  // assert
 
 // No GC
 //#define MZC_NO_GC
 
 // Multithread
-//#define MZC_GC_MT
+//#define MZC3_GC_MT
 
-// Debugging output to stderr (for Windows only)
+// Debugging output to stderr
 //#define MZC_DEBUG_OUTPUT_IS_STDERR
+
+// Debugging output to stdout
+//#define MZC_DEBUG_OUTPUT_IS_STDOUT
+
+#include "GC.h"

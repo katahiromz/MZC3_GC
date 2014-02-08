@@ -2,57 +2,52 @@
    by Katayama Hirofumi MZ <katayama.hirofumi.mz@gmail.com>
    This file is public domain software. */
 
-// The switching macros:
-//  #define MZC_NO_GC to disable GC,
-//  #define NDEBUG for non-debugging,
-//  #define MZC_GC_MT for multithread,
-//  #define MZC_DEBUG_OUTPUT_IS_STDERR to output report to stderr (Windows only),
-//  #define _WIN32 for Windows.
-
 #include "stdafx.h"
 
 #ifndef MZC_NO_GC
 
-#undef malloc
-#undef calloc
-#undef realloc
-#undef free
-#undef new
-#undef new_nothrow
-
-#ifdef MZC_NO_INLINING
-    #undef MZC_INLINE
-    #define MZC_INLINE  /*empty*/
-    #ifdef MZC3_INSTALLED
-        #include <mzc3/GC_inl.h>
-    #else
-        #include "GC_inl.h"
-    #endif
-# endif
+#include "GC_unwrap.h"
 
 //////////////////////////////////////////////////////////////////////////////
 // MzcTraceA --- Output a message for debugging
 
 #ifndef MzcTraceA
-    void MzcTraceA(const char *fmt, ...)
-    {
-        using namespace std;
-        assert(fmt);
-        #if defined(_WIN32) && !defined(MZC_DEBUG_OUTPUT_IS_STDERR)
-            static char buf[512];
-            va_list va;
-            va_start(va, fmt);
-            wvsprintfA(buf, fmt, va);
-            OutputDebugStringA(buf);
-            va_end(va);
-        #else // ndef _WIN32
-            va_list va;
-            va_start(va, fmt);
-            vfprintf(stderr, fmt, va);
-            va_end(va);
-        #endif // ndef _WIN32
-    }
-    #define MzcTraceA MzcTraceA
+    #ifdef _DEBUG
+        void MzcTraceA(const char *fmt, ...)
+        {
+            using namespace std;
+            assert(fmt);
+            #ifdef MZC_DEBUG_OUTPUT_IS_STDERR
+                va_list va;
+                va_start(va, fmt);
+                vfprintf(stderr, fmt, va);
+                va_end(va);
+            #elif defined(MZC_DEBUG_OUTPUT_IS_STDOUT)
+                va_list va;
+                va_start(va, fmt);
+                vfprintf(stdout, fmt, va);
+                va_end(va);
+            #elif defined(_WIN32)
+                static char buf[512];
+                va_list va;
+                va_start(va, fmt);
+                wvsprintfA(buf, fmt, va);
+                OutputDebugStringA(buf);
+                va_end(va);
+            #else
+                va_list va;
+                va_start(va, fmt);
+                vfprintf(stderr, fmt, va);
+                va_end(va);
+            #endif
+        }
+        #define MzcTraceA MzcTraceA
+    #else
+        inline void MzcTraceA(const char *, ...)
+        {
+        }
+        #define MzcTraceA 1 ? (void)0 : (void)MzcTraceA
+    #endif
 #endif  // ndef MzcTraceA
 
 //////////////////////////////////////////////////////////////////////////////
@@ -68,23 +63,23 @@ struct MZC3_GC_ENTRY
     {
     }
 
-#ifdef _DEBUG
-    const char *m_file;
-    int         m_line;
-    MZC3_GC_ENTRY(void *ptr, std::size_t size, int depth, const char *file, int line)
-    : m_ptr(ptr), m_size(size), m_depth(depth),
-      m_file(file), m_line(line)
-    {
-        assert(ptr);
-        assert(file);
-    }
-#else   // def _DEBUG
-    MZC3_GC_ENTRY(void *ptr, std::size_t size, int depth)
-    : m_ptr(ptr), m_size(size), m_depth(depth)
-    {
-        assert(ptr);
-    }
-#endif  // def _DEBUG
+    #ifdef _DEBUG
+        const char *m_file;
+        int         m_line;
+        MZC3_GC_ENTRY(void *ptr, std::size_t size, std::size_t depth,
+                      const char *file, int line)
+        : m_ptr(ptr), m_size(size), m_depth(depth),
+          m_file(file), m_line(line)
+        {
+            assert(ptr);
+            assert(file);
+        }
+    #else   // ndef DEBUG
+        MZC3_GC_ENTRY(void *ptr, std::size_t size, std::size_t depth)
+        : m_ptr(ptr), m_size(size), m_depth(depth)
+        {
+        }
+    #endif  // ndef DEBUG
 };
 
 //////////////////////////////////////////////////////////////////////////////
@@ -93,7 +88,7 @@ struct MZC3_GC_ENTRY
 struct MZC3_GC_STATE
 {
     MZC3_GC_STATE *next;
-    bool gc_enabled;
+    int gc_enabled;
 };
 
 //////////////////////////////////////////////////////////////////////////////
@@ -101,7 +96,7 @@ struct MZC3_GC_STATE
 
 struct MZC3_GC_THREAD_ENTRY
 {
-    #ifdef MZC_GC_MT
+    #ifdef MZC3_GC_MT
         #ifdef _WIN32
             DWORD tid;
         #else
@@ -112,7 +107,7 @@ struct MZC3_GC_THREAD_ENTRY
     MZC3_GC_STATE *state_stack;
 };
 
-#ifdef MZC_GC_MT
+#ifdef MZC3_GC_MT
     static MZC3_GC_THREAD_ENTRY *s_gc_thread_entries = NULL;
     static std::size_t s_gc_thread_entry_count = 0;
     static std::size_t s_gc_thread_entry_capacity = 0;
@@ -122,12 +117,12 @@ struct MZC3_GC_THREAD_ENTRY
 
 //////////////////////////////////////////////////////////////////////////////
 
-#ifndef MZC_GC_MT
+#ifndef MZC3_GC_MT
     inline
 #endif
 MZC3_GC_THREAD_ENTRY *MZC3_GC_GetThreadEntry(void)
 {
-    #ifdef MZC_GC_MT
+    #ifdef MZC3_GC_MT
         #ifdef _WIN32
             const DWORD tid = GetCurrentThreadId();
         #else
@@ -156,7 +151,8 @@ MZC3_GC_THREAD_ENTRY *MZC3_GC_GetThreadEntry(void)
         const std::size_t newsize = newcapacity * sizeof(MZC3_GC_THREAD_ENTRY);
 
         MZC3_GC_THREAD_ENTRY *newentries;
-        newentries = (MZC3_GC_THREAD_ENTRY *)realloc(s_gc_thread_entries, newsize);
+        newentries = reinterpret_cast<MZC3_GC_THREAD_ENTRY *>(
+            realloc(s_gc_thread_entries, newsize));
         if (newentries)
         {
             s_gc_thread_entries = newentries;
@@ -192,7 +188,7 @@ inline bool MZC3_GC_IsEnabled(void)
 //////////////////////////////////////////////////////////////////////////////
 // synchronization
 
-#ifdef MZC_GC_MT
+#ifdef MZC3_GC_MT
     #ifdef _WIN32
         static CRITICAL_SECTION s_gc_cs;
     #else
@@ -202,7 +198,7 @@ inline bool MZC3_GC_IsEnabled(void)
 
 inline void InitializeLock(void)
 {
-    #ifdef MZC_GC_MT
+    #ifdef MZC3_GC_MT
         #ifdef _WIN32
             InitializeCriticalSection(&s_gc_cs);
         #else
@@ -217,7 +213,7 @@ inline void InitializeLock(void)
 
 inline void EnterLock(void)
 {
-    #ifdef MZC_GC_MT
+    #ifdef MZC3_GC_MT
         #ifdef _WIN32
             EnterCriticalSection(&s_gc_cs);
         #else
@@ -228,7 +224,7 @@ inline void EnterLock(void)
 
 inline void LeaveLock(void)
 {
-    #ifdef MZC_GC_MT
+    #ifdef MZC3_GC_MT
         #ifdef _WIN32
             LeaveCriticalSection(&s_gc_cs);
         #else
@@ -239,7 +235,7 @@ inline void LeaveLock(void)
 
 inline void DeleteLock(void)
 {
-    #ifdef MZC_GC_MT
+    #ifdef MZC3_GC_MT
         #ifdef _WIN32
             DeleteCriticalSection(&s_gc_cs);
         #else
@@ -265,116 +261,60 @@ public:
         s_gc_constructed = true;
     }
 
-    ~MZC3_GC_MGR()
-    {
-        assert(s_gc_entries == NULL || s_gc_capacity);
+    ~MZC3_GC_MGR();
+};
 
-        EnterLock();
-        s_gc_constructed = false;
+MZC3_GC_MGR::~MZC3_GC_MGR()
+{
+    assert(s_gc_entries == NULL || s_gc_capacity);
 
-        std::size_t gc_count = s_gc_count;
-        s_gc_count = 0;
-        s_gc_capacity = 0;
+    EnterLock();
+    s_gc_constructed = false;
 
-        MZC3_GC_ENTRY *gc_entries = s_gc_entries;
-        s_gc_entries = NULL;
-        for (std::size_t i = 0; i < gc_count; i++)
-            free(gc_entries[i].m_ptr);
-        free(gc_entries);
+    std::size_t gc_count = s_gc_count;
+    s_gc_count = 0;
+    s_gc_capacity = 0;
 
-        #ifdef MZC_GC_MT
-            MZC3_GC_THREAD_ENTRY *gc_thread_entries = s_gc_thread_entries;
-            s_gc_thread_entries = NULL;
+    MZC3_GC_ENTRY *gc_entries = s_gc_entries;
+    s_gc_entries = NULL;
+    for (std::size_t i = 0; i < gc_count; i++)
+        free(gc_entries[i].m_ptr);
+    free(gc_entries);
 
-            std::size_t gc_thread_entry_count = s_gc_thread_entry_count;
-            s_gc_thread_entry_count = 0;
-            s_gc_thread_entry_capacity = 0;
+    #ifdef MZC3_GC_MT
+        MZC3_GC_THREAD_ENTRY *gc_thread_entries = s_gc_thread_entries;
+        s_gc_thread_entries = NULL;
 
-            for (std::size_t i = 0; i < gc_thread_entry_count; i++)
-            {
-                MZC3_GC_STATE *state = gc_thread_entries[i].state_stack;
-                while (state)
-                {
-                    MZC3_GC_STATE *next = state->next;
-                    free(state);
-                    state = next;
-                }
-            }
-            free(gc_thread_entries);
-        #else
-            MZC3_GC_STATE *state = s_only_one_gc_thread_entry.state_stack;
+        std::size_t gc_thread_entry_count = s_gc_thread_entry_count;
+        s_gc_thread_entry_count = 0;
+        s_gc_thread_entry_capacity = 0;
+
+        for (std::size_t i = 0; i < gc_thread_entry_count; i++)
+        {
+            MZC3_GC_STATE *state = gc_thread_entries[i].state_stack;
             while (state)
             {
                 MZC3_GC_STATE *next = state->next;
                 free(state);
                 state = next;
             }
-        #endif
-        LeaveLock();
-
-        DeleteLock();
-    }
-} mzc_gc_mgr;
-
-#ifdef _DEBUG
-    static void MZC3_GC_AddPtr(void *ptr, std::size_t size, const char *file, int line)
-    {
-        assert(ptr);
-        assert(file);
-        if (!s_gc_constructed)
-            return;
-
-        MZC3_GC_ENTRY entry(ptr, size, MZC3_GC_GetDepth(), file, line);
-        if (s_gc_count + 1 > s_gc_capacity)
-        {
-            std::size_t newcapacity;
-            if (!s_gc_capacity)
-                newcapacity = 50;
-            else
-                newcapacity = s_gc_capacity * 2;
-
-            const std::size_t newsize = newcapacity * sizeof(MZC3_GC_ENTRY);
-            MZC3_GC_ENTRY *newentries = (MZC3_GC_ENTRY *)realloc(s_gc_entries, newsize);
-            if (newentries)
-            {
-                s_gc_entries = newentries;
-                s_gc_capacity = newcapacity;
-            }
-            else
-            {
-                MzcTraceA("%s (%d): MZC3_GC: ERROR: MZC3_GC_AddPtr failed\n",
-                          file, line);
-                return;
-            }
         }
-        memcpy(&s_gc_entries[s_gc_count], &entry, sizeof(entry));
-        s_gc_count++;
-    }
-#else  // ndef _DEBUG
-    static void MZC3_GC_AddPtr(void *ptr, std::size_t size)
-    {
-        assert(ptr);
-        assert(file);
-        MZC3_GC_ENTRY entry(ptr, size, MZC3_GC_GetDepth());
-        if (s_gc_count + 1 > s_gc_capacity)
+        free(gc_thread_entries);
+    #else
+        MZC3_GC_STATE *state = s_only_one_gc_thread_entry.state_stack;
+        while (state)
         {
-            const std::size_t newcapacity = s_gc_capacity * 2 + 30;
-            const std::size_t newsize = newcapacity * sizeof(MZC3_GC_ENTRY);
-            MZC3_GC_ENTRY *newentries = (MZC3_GC_ENTRY *)realloc(s_gc_entries, newsize);
-            if (newentries)
-            {
-                s_gc_entries = newentries;
-                s_gc_capacity = newcapacity;
-            }
-            else
-            {
-                return;
-            }
+            MZC3_GC_STATE *next = state->next;
+            free(state);
+            state = next;
         }
-        memcpy(&s_gc_entries[s_gc_count], &entry, sizeof(entry));
-        s_gc_count++;
-    }
-#endif // ndef _DEBUG
+    #endif
+    LeaveLock();
+
+    DeleteLock();
+}
+
+MZC3_GC_MGR mzc_gc_mgr;
 
 static MZC3_GC_ENTRY *MZC3_GC_Find(void *ptr)
 {
@@ -428,6 +368,75 @@ static void MZC3_GC_GarbageCollect(void)
     }
 }
 
+#ifdef _DEBUG
+    static void MZC3_GC_AddPtr(void *ptr, std::size_t size, const char *file, int line)
+    {
+        assert(ptr);
+        assert(file);
+        if (!s_gc_constructed)
+            return;
+
+        MZC3_GC_ENTRY entry(ptr, size, MZC3_GC_GetDepth(), file, line);
+        if (s_gc_count + 1 > s_gc_capacity)
+        {
+            std::size_t newcapacity;
+            if (!s_gc_capacity)
+                newcapacity = 50;
+            else
+                newcapacity = s_gc_capacity * 2;
+
+            const std::size_t newsize = newcapacity * sizeof(MZC3_GC_ENTRY);
+            MZC3_GC_ENTRY *newentries =
+                reinterpret_cast<MZC3_GC_ENTRY *>(realloc(s_gc_entries, newsize));
+            if (newentries)
+            {
+                s_gc_entries = newentries;
+                s_gc_capacity = newcapacity;
+            }
+            else
+            {
+                MzcTraceA("%s (%d): MZC3_GC: ERROR: MZC3_GC_AddPtr failed\n",
+                          file, line);
+                return;
+            }
+        }
+        memcpy(&s_gc_entries[s_gc_count], &entry, sizeof(entry));
+        s_gc_count++;
+    }
+#else   // ndef _DEBUG
+    static void MZC3_GC_AddPtr(void *ptr, std::size_t size)
+    {
+        assert(ptr);
+        if (!s_gc_constructed)
+            return;
+
+        MZC3_GC_ENTRY entry(ptr, size, MZC3_GC_GetDepth());
+        if (s_gc_count + 1 > s_gc_capacity)
+        {
+            std::size_t newcapacity;
+            if (!s_gc_capacity)
+                newcapacity = 50;
+            else
+                newcapacity = s_gc_capacity * 2;
+
+            const std::size_t newsize = newcapacity * sizeof(MZC3_GC_ENTRY);
+            MZC3_GC_ENTRY *newentries =
+                reinterpret_cast<MZC3_GC_ENTRY *>(realloc(s_gc_entries, newsize));
+            if (newentries)
+            {
+                s_gc_entries = newentries;
+                s_gc_capacity = newcapacity;
+            }
+            else
+            {
+                return;
+            }
+        }
+        memcpy(&s_gc_entries[s_gc_count], &entry, sizeof(entry));
+        s_gc_count++;
+    }
+#endif  // ndef _DEBUG
+
 //////////////////////////////////////////////////////////////////////////////
 // misc functions
 
@@ -439,7 +448,7 @@ extern "C" void MzcGC_Enter(int enable_gc)
     if (entry)
     {
         MZC3_GC_STATE *state;
-        state = (MZC3_GC_STATE *)malloc(sizeof(MZC3_GC_STATE));
+        state = reinterpret_cast<MZC3_GC_STATE *>(malloc(sizeof(MZC3_GC_STATE)));
         if (state)
         {
             state->gc_enabled = enable_gc;
@@ -516,7 +525,7 @@ extern "C" void MzcGC_Leave(void)
 
         LeaveLock();
     }
-#endif    // def _DEBUG
+#endif
 
 extern "C" void MzcGC_GarbageCollect(void)
 {
@@ -528,12 +537,12 @@ extern "C" void MzcGC_GarbageCollect(void)
 }
 
 //////////////////////////////////////////////////////////////////////////////
-// mzcmalloc, mzccalloc, mzcrealloc, mzcfree
+// mzcmalloc, mzccalloc, mzcrealloc, mzcfree, mzcstrdup, mzcwcsdup
 
 #ifdef _DEBUG
     extern "C" void *mzcmalloc(std::size_t size, const char *file, int line)
     {
-        assert(file);
+        using namespace std;
         void *ptr = malloc(size);
         if (ptr)
         {
@@ -559,7 +568,7 @@ extern "C" void MzcGC_GarbageCollect(void)
 
     extern "C" void *mzccalloc(std::size_t num, std::size_t size, const char *file, int line)
     {
-        assert(file);
+        using namespace std;
         void *ptr = calloc(num, size);
         if (ptr)
         {
@@ -585,9 +594,9 @@ extern "C" void MzcGC_GarbageCollect(void)
         return ptr;
     }
 
-    extern "C" void *mzcrealloc(void *ptr, size_t size, const char *file, int line)
+    extern "C" void *mzcrealloc(void *ptr, std::size_t size, const char *file, int line)
     {
-        assert(file);
+        using namespace std;
         void *newptr;
 
         EnterLock();
@@ -657,50 +666,76 @@ extern "C" void MzcGC_GarbageCollect(void)
 
     extern "C" void mzcfree(void *ptr)
     {
+        using namespace std;
         if (ptr == NULL)
             return;
 
         EnterLock();
 
-        MZC3_GC_ENTRY *entry = MZC3_GC_Find(ptr);
-        if (entry)
-            MZC3_GC_EraseEntry(entry);
+        MZC3_GC_ErasePtr(ptr);
 
         LeaveLock();
 
         free(ptr);
     }
+
+    extern "C" char *mzcstrdup(const char *str, const char *file, int line)
+    {
+        using namespace std;
+        const std::size_t len = strlen(str);
+        const std::size_t size = (len + 1) * sizeof(char);
+        char *p = reinterpret_cast<char *>(mzcmalloc(size, file, line));
+        if (p)
+            memcpy(p, str, size);
+        return p;
+    }
+
+    extern "C" wchar_t *mzcwcsdup(const wchar_t *str, const char *file, int line)
+    {
+        using namespace std;
+        const std::size_t len = wcslen(str);
+        const std::size_t size = (len + 1) * sizeof(wchar_t);
+        wchar_t *p = reinterpret_cast<wchar_t *>(mzcmalloc(size, file, line));
+        if (p)
+            memcpy(p, str, size);
+        return p;
+    }
 #else   // ndef _DEBUG
     extern "C" void *mzcmalloc(std::size_t size)
     {
+        using namespace std;
         void *ptr = malloc(size);
+        if (ptr)
+        {
+            EnterLock();
 
-        EnterLock();
+            if (MZC3_GC_IsEnabled())
+                MZC3_GC_AddPtr(ptr, size);
 
-        if (ptr && MZC3_GC_IsEnabled())
-            MZC3_GC_AddPtr(ptr, size);
-
-        LeaveLock();
-
+            LeaveLock();
+        }
         return ptr;
     }
 
     extern "C" void *mzccalloc(std::size_t num, std::size_t size)
     {
+        using namespace std;
         void *ptr = calloc(num, size);
+        if (ptr)
+        {
+            EnterLock();
 
-        EnterLock();
+            if (MZC3_GC_IsEnabled())
+                MZC3_GC_AddPtr(ptr, num * size);
 
-        if (ptr && MZC3_GC_IsEnabled())
-            MZC3_GC_AddPtr(ptr, num * size);
-
-        LeaveLock();
-
+            LeaveLock();
+        }
         return ptr;
     }
 
-    extern "C" void *mzcrealloc(void *ptr, size_t size)
+    extern "C" void *mzcrealloc(void *ptr, std::size_t size)
     {
+        using namespace std;
         void *newptr;
 
         EnterLock();
@@ -718,8 +753,11 @@ extern "C" void MzcGC_GarbageCollect(void)
         else if (ptr == NULL)
         {
             newptr = realloc(ptr, size);
-            if (newptr && MZC3_GC_IsEnabled())
-                MZC3_GC_AddPtr(newptr, size);
+            if (newptr)
+            {
+                if (MZC3_GC_IsEnabled())
+                    MZC3_GC_AddPtr(newptr, size);
+            }
         }
 
         LeaveLock();
@@ -729,6 +767,7 @@ extern "C" void MzcGC_GarbageCollect(void)
 
     extern "C" void mzcfree(void *ptr)
     {
+        using namespace std;
         if (ptr == NULL)
             return;
 
@@ -740,24 +779,93 @@ extern "C" void MzcGC_GarbageCollect(void)
 
         free(ptr);
     }
+
+    extern "C" char *mzcstrdup(const char *str)
+    {
+        using namespace std;
+        const std::size_t len = strlen(str);
+        const std::size_t size = (len + 1) * sizeof(char);
+        char *p = reinterpret_cast<char *>(mzcmalloc(size));
+        if (p)
+            memcpy(p, str, size);
+        return p;
+    }
+
+    extern "C" wchar_t *mzcwcsdup(const wchar_t *str)
+    {
+        using namespace std;
+        const std::size_t len = wcslen(str);
+        const std::size_t size = (len + 1) * sizeof(wchar_t);
+        wchar_t *p = reinterpret_cast<wchar_t *>(mzcmalloc(size));
+        if (p)
+            memcpy(p, str, size);
+        return p;
+    }
 #endif  // ndef _DEBUG
 
 //////////////////////////////////////////////////////////////////////////////
 // new, delete
 
-#ifdef _DEBUG
-    void* operator new(std::size_t size) throw(std::bad_alloc)
+void* operator new(std::size_t size) throw(std::bad_alloc)
+{
+    #ifdef _DEBUG
+        void *ptr = mzcmalloc(size ? size : 1, __FILE__, __LINE__);
+    #else
+        void *ptr = mzcmalloc(size ? size : 1);
+    #endif
+    if (ptr == NULL)
+        throw std::bad_alloc();
+    return ptr;
+}
+
+void* operator new[](std::size_t size) throw(std::bad_alloc)
+{
+    #ifdef _DEBUG
+        void *ptr = mzcmalloc(size ? size : 1, __FILE__, __LINE__);
+    #else
+        void *ptr = mzcmalloc(size ? size : 1);
+    #endif
+    if (ptr == NULL)
+        throw std::bad_alloc();
+    return ptr;
+}
+
+#ifndef __BORLANDC__    // avoid E2171
+    void* operator new(std::size_t size, const std::nothrow_t&) throw()
     {
-        void *ptr = malloc(size);
-        if (ptr == NULL)
-            throw std::bad_alloc();
+        #ifdef _DEBUG
+            void *ptr = mzcmalloc(size ? size : 1, __FILE__, __LINE__);
+        #else
+            void *ptr = mzcmalloc(size ? size : 1);
+        #endif
         return ptr;
     }
 
+    void* operator new[](std::size_t size, const std::nothrow_t&) throw()
+    {
+        #ifdef _DEBUG
+            void *ptr = mzcmalloc(size ? size : 1, __FILE__, __LINE__);
+        #else
+            void *ptr = mzcmalloc(size ? size : 1);
+        #endif
+        return ptr;
+    }
+#endif
+
+void operator delete(void* ptr) throw()
+{
+    mzcfree(ptr);
+}
+
+void operator delete[](void* ptr) throw()
+{
+    mzcfree(ptr);
+}
+
+#ifdef _DEBUG
     void* operator new(std::size_t size, const char *file, int line)
           throw(std::bad_alloc)
     {
-        assert(file);
         void *ptr = mzcmalloc((size ? size : 1), file, line);
         if (ptr == NULL)
             throw std::bad_alloc();
@@ -767,57 +875,30 @@ extern "C" void MzcGC_GarbageCollect(void)
     void* operator new[](std::size_t size, const char *file, int line)
           throw(std::bad_alloc)
     {
-        assert(file);
         void *ptr = mzcmalloc((size ? size : 1), file, line);
         if (ptr == NULL)
             throw std::bad_alloc();
         return ptr;
     }
 
-    void operator delete(void* ptr) throw()
-    {
-        mzcfree(ptr);
-    }
-
-    void operator delete[](void* ptr) throw()
-    {
-        mzcfree(ptr);
-    }
-
     void* operator new(std::size_t size, const std::nothrow_t&,
-                                     const char *file, int line) throw()
+                       const char *file, int line) throw()
     {
-        assert(file);
         return mzcmalloc((size ? size : 1), file, line);
     }
 
     void* operator new[](std::size_t size, const std::nothrow_t&,
-                                         const char *file, int line) throw()
+                         const char *file, int line) throw()
     {
-        assert(file);
         return mzcmalloc((size ? size : 1), file, line);
     }
-#endif  // def _DEBUG
+#endif
 
 //////////////////////////////////////////////////////////////////////////////
 // test and sample
 
 #ifdef UNITTEST
-    #ifdef _DEBUG
-        #define malloc(size) mzcmalloc((size), __FILE__, __LINE__)
-        #define calloc(num,size) mzccalloc((num), (size), __FILE__, __LINE__)
-        #define realloc(ptr,size) mzcrealloc((ptr), (size), __FILE__, __LINE__)
-        #define free(ptr) mzcfree((ptr))
-        #define new new(__FILE__, __LINE__)
-        #define new_nothrow new(std::nothrow(), __FILE__, __LINE__)
-    #else
-        #define malloc(size) mzcmalloc((size))
-        #define calloc(num,size) mzccalloc((num), (size))
-        #define realloc(ptr,size) mzcrealloc(ptr), (size))
-        #define free(ptr) mzcfree((ptr))
-        #define new new
-        #define new_nothrow new(std::nothrow())
-    #endif
+    #include "GC_wrap.h"
 
     int main(void)
     {
@@ -827,9 +908,10 @@ extern "C" void MzcGC_GarbageCollect(void)
         void *p3;
         char *p4;
         void *p5;
+        char *p6;
         MzcGC_Enter(1); // GC-enabled section
         {
-            void *p1 = malloc(1);
+            p1 = malloc(1);
             printf("p1: %p\n", p1);
             MzcGC_Enter(1); // GC-enabled section
             {
@@ -849,6 +931,10 @@ extern "C" void MzcGC_GarbageCollect(void)
             MzcGC_Leave();
             p5 = new char[5];
             printf("p5: %p\n", p5);
+            p6 = strdup("test6");
+            printf("p6: %p\n", p6);
+            char *p7 = new char[7];
+            printf("p7: %p\n", p7);
             MzcGC_Report();
         }
         MzcGC_Leave();
