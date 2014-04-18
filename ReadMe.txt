@@ -5,7 +5,6 @@
 --------------------------------------------------------------------------------
 
 This is MZC3 C/C++ garbage collector (MZC3_GC) by Katayama Hirofumi MZ.
-This software is public domain software.
 
 
 **USAGE**

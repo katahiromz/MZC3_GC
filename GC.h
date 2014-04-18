@@ -1,6 +1,8 @@
-/* MZC3_GC -- MZC3 C/C++ garbage collector
-   by Katayama Hirofumi MZ <katayama.hirofumi.mz@gmail.com>
-   This file is public domain software. */
+////////////////////////////////////////////////////////////////////////////
+// GC.h -- MZC3 GC
+// This file is part of MZC3.  See file "ReadMe.txt" and "License.txt".
+////////////////////////////////////////////////////////////////////////////
+
 #ifndef __MZC3_GC_H__
 #define __MZC3_GC_H__
 

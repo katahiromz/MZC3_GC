@@ -1,6 +1,7 @@
-/* MZC3_GC -- MZC3 C/C++ garbage collector
-   by Katayama Hirofumi MZ <katayama.hirofumi.mz@gmail.com>
-   This file is public domain software. */
+////////////////////////////////////////////////////////////////////////////
+// GC.cpp -- MZC3 GC
+// This file is part of MZC3.  See file "ReadMe.txt" and "License.txt".
+////////////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
 
@@ -895,11 +896,10 @@ void operator delete[](void* ptr) throw()
 #endif
 
 //////////////////////////////////////////////////////////////////////////////
-// test and sample
 
 #ifdef UNITTEST
+    // unit test and example
     #include "GC_wrap.h"
-
     int main(void)
     {
         using namespace std;
